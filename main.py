@@ -113,3 +113,40 @@ def build_ui_canvas(palette, title_text, status_text, cam_frame, processed_frame
 
     return ui
 
+# ---------- Processed Panel (placeholder) ----------
+def processed_panel(frame, palette):
+    h, w = PANEL_H - 20, PANEL_W - 40
+    canvas = np.full((h, w, 3), 255, dtype=np.uint8)
+    cv2.rectangle(canvas, (0, 0), (w, 50), palette["title_grad"][0], -1)
+    cv2.putText(canvas, "", (18, 34),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.8, palette["text"], 2, cv2.LINE_AA)
+    return canvas
+
+# ---------- Eye Tracking Globals ----------
+mp_face_mesh = mp.solutions.face_mesh
+# We'll open capture inside run function using CAM_INDEX
+screen_w, screen_h = pya.size()
+
+# smoothing
+smooth_x, smooth_y = 0, 0
+alpha_x = 0.2
+alpha_y = 0.1
+dead_zone = 30
+
+# Calibration storage
+calib_points = {}
+calib_order = ["center", "left", "right", "top", "bottom"]
+current_calib = 0
+space_points = {}
+space_points2 = {}
+
+# blink detection
+click_timer = 0
+blink_threshold = 0.22
+frames_to_click = 5
+LEFT_EYE = [263, 387, 385, 362, 380, 373]
+
+# preview window size
+VIS_W, VIS_H = 500, 300
+cursor_x, cursor_y = VIS_W // 2, VIS_H // 2
+
