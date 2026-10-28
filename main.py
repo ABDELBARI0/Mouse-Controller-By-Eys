@@ -66,3 +66,50 @@ def draw_rounded_rect(img, x, y, w, h, color, thickness=2, r=12):
     cv2.circle(img, (x+w-r, y+r), r, color, thickness)
     cv2.circle(img, (x+r, y+h-r), r, color, thickness)
     cv2.circle(img, (x+w-r, y+h-r), r, color, thickness)
+    
+# ---------- UI BUILD ----------
+def build_ui_canvas(palette, title_text, status_text, cam_frame, processed_frame, fps):
+    ui = np.full((WIN_H, WIN_W, 3), palette["bg"], dtype=np.uint8)
+
+    # Title Bar
+    draw_gradient_rect(
+        ui, 0, 0, WIN_W, TITLE_H,
+        palette["title_grad"][0], palette["title_grad"][1],
+        vertical=False
+    )
+    cv2.putText(ui, title_text, (24, TITLE_H//2 + 10),
+                cv2.FONT_HERSHEY_SIMPLEX, 1.0, palette["text"], 2, cv2.LINE_AA)
+
+    # Left Panel (Camera)
+    left_x, left_y = 20, TITLE_H + 10
+    left_w, left_h = PANEL_W - 40, PANEL_H - 20
+
+    cam_box = letterbox_resize(cam_frame, left_w, left_h)
+    ui[left_y:left_y+left_h, left_x:left_x+left_w] = cam_box
+    draw_rounded_rect(ui, left_x-4, left_y-4, left_w+8, left_h+8, palette["border"], 2, 14)
+    cv2.putText(ui, "Camera View", (left_x+8, left_y+28),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.7, palette["text"], 2, cv2.LINE_AA)
+
+    # Right Panel
+    right_x, right_y = PANEL_W + 20, TITLE_H + 10
+    right_w, right_h = PANEL_W - 40, PANEL_H - 20
+
+    proc_box = letterbox_resize(processed_frame, right_w, right_h)
+    ui[right_y:right_y+right_h, right_x:right_x+right_w] = proc_box
+    draw_rounded_rect(ui, right_x-4, right_y-4, right_w+8, right_h+8, palette["border"], 2, 14)
+    cv2.putText(ui, "Mouse Tracking", (right_x+8, right_y+28),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.7, palette["text"], 2, cv2.LINE_AA)
+
+    # Status Bar
+    status_y = WIN_H - STATUS_H
+    cv2.rectangle(ui, (0, status_y), (WIN_W, WIN_H), palette["title_grad"][0], -1)
+    cv2.putText(ui, status_text, (20, status_y + 30),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.7, palette["text"], 2, cv2.LINE_AA)
+    cv2.putText(ui, f"FPS: {fps:.1f}", (WIN_W - 160, status_y + 30),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.7, palette["text"], 2, cv2.LINE_AA)
+
+    # Accent strip
+    cv2.rectangle(ui, (WIN_W-6, 0), (WIN_W, WIN_H), palette["accent"], -1)
+
+    return ui
+
