@@ -150,3 +150,47 @@ LEFT_EYE = [263, 387, 385, 362, 380, 373]
 VIS_W, VIS_H = 500, 300
 cursor_x, cursor_y = VIS_W // 2, VIS_H // 2
 
+# --- helper functions for eye tracking ---
+def get_rel_iris(landmarks):
+    try:
+        re_left, re_right = landmarks[33], landmarks[133]
+        re_top, re_bot = landmarks[159], landmarks[145]
+        iris1 = landmarks[468]
+
+        eye_width = (re_right.x - re_left.x)
+        eye_height = (re_bot.y - re_top.y)
+
+        if abs(eye_width) < 1e-6 or abs(eye_height) < 1e-6:
+            return None, None
+
+        rel_x1 = (iris1.x - re_left.x) / eye_width
+        rel_y1 = (iris1.y - re_top.y) / eye_height
+
+        return rel_x1, rel_y1
+    except Exception:
+        return None, None
+
+def eye_aspect_ratio(landmarks, eye_indices, frame=None, frame_w=None, frame_h=None):
+    # compute EAR from 6 landmark indices (expects normalized landmarks with .x/.y)
+    try:
+        A = math.dist([landmarks[eye_indices[1]].x, landmarks[eye_indices[1]].y],
+                      [landmarks[eye_indices[5]].x, landmarks[eye_indices[5]].y])
+        B = math.dist([landmarks[eye_indices[2]].x, landmarks[eye_indices[2]].y],
+                      [landmarks[eye_indices[4]].x, landmarks[eye_indices[4]].y])
+        C = math.dist([landmarks[eye_indices[0]].x, landmarks[eye_indices[0]].y],
+                      [landmarks[eye_indices[3]].x, landmarks[eye_indices[3]].y])
+        ear = (A + B) / (2.0 * C) if C != 0 else 0.0
+
+        # optional debug drawing if frame provided
+        if frame is not None and frame_w is not None and frame_h is not None:
+            try:
+                pts = [263, 387, 385, 362, 380, 373]
+                for idx in pts:
+                    cx, cy = int(landmarks[idx].x * frame_w), int(landmarks[idx].y * frame_h)
+                    cv2.circle(frame, (cx, cy), 2, (0, 255, 255), -1)
+            except Exception:
+                pass
+
+        return ear
+    except Exception:
+        return 0.0
