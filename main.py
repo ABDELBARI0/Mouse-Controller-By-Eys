@@ -194,3 +194,181 @@ def eye_aspect_ratio(landmarks, eye_indices, frame=None, frame_w=None, frame_h=N
         return ear
     except Exception:
         return 0.0
+
+# ---------- MAIN (integration) ----------
+def run_ui_tester_with_gaze():
+    global smooth_x, smooth_y, cursor_x, cursor_y
+    global calib_points, current_calib, click_timer, space_points, space_points2
+
+    cap = cv2.VideoCapture(CAM_INDEX)
+    if not cap.isOpened():
+        print("Error: cannot open camera.")
+        return
+
+    palette_name, pal_func = PALETTES[3]
+    palette = pal_func()
+
+    prev_time = time.time()
+    fps = 0.0
+    title = "                                   Mouse Control via Eye Tracking - Theme 3"
+
+    # Use mediapipe face mesh
+    with mp_face_mesh.FaceMesh(
+        max_num_faces=1,
+        refine_landmarks=True,
+        min_detection_confidence=0.5,
+        min_tracking_confidence=0.5
+    ) as face_mesh:
+
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+
+            frame = cv2.flip(frame, 1)
+            frame_h, frame_w = frame.shape[:2]
+
+            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            results = face_mesh.process(frame_rgb)
+
+            # Build preview image for right panel
+            vis = np.zeros((VIS_H, VIS_W, 3), dtype=np.uint8)
+            cv2.putText(vis, "Cursor Preview", (10, 25),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+
+            try:
+                if results.multi_face_landmarks:
+                    lm = results.multi_face_landmarks[0].landmark
+                    rel_x, rel_y = get_rel_iris(lm)
+
+                    # Blink detection
+                    right_ear = eye_aspect_ratio(lm, LEFT_EYE, frame=frame, frame_w=frame_w, frame_h=frame_h)
+                    if right_ear < blink_threshold:
+                        click_timer += 1
+                    else:
+                        click_timer = 0
+
+                    if click_timer > frames_to_click:
+                        try:
+                            pya.click()
+                        except Exception:
+                            pass
+                        click_timer = 0
+                        cv2.putText(frame, "BLINK CLICK!", (50, 100),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+
+                    if rel_x is None or rel_y is None:
+                        cv2.putText(frame, "Invalid iris detection", (30, 60),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+                    else:
+                        # Calibration prompt
+                        if current_calib < len(calib_order):
+                            point_name = calib_order[current_calib]
+                            cv2.putText(frame, f"Look at {point_name} and press SPACE", (30,30),
+                                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0,255,0), 2)
+
+                        # After calibrated
+                        if len(calib_points) == 5:
+                            left_x = min(calib_points["left"][0], calib_points["right"][0])
+                            right_x = max(calib_points["left"][0], calib_points["right"][0])
+                            top_y = min(calib_points["top"][1], calib_points["bottom"][1])
+                            bottom_y = max(calib_points["top"][1], calib_points["bottom"][1])
+
+                            rel_x = np.clip(rel_x, left_x, right_x)
+                            rel_y = np.clip(rel_y, top_y, bottom_y)
+
+                            # Map to screen coords
+                            x_norm = np.interp(rel_x, [left_x, right_x], [0,screen_w])
+
+                            dy = rel_y - calib_points["center"][1]
+                            y_norm = np.interp(dy,
+                                               [calib_points["top"][1] - calib_points["center"][1],
+                                                calib_points["bottom"][1] - calib_points["center"][1]],
+                                               [screen_h, 0])
+
+                            x_norm = np.clip(x_norm, 0, screen_w - 1)
+                            y_norm = np.clip(y_norm, 0, screen_h - 1)
+
+                            if abs(smooth_x - x_norm) > dead_zone or abs(smooth_y - y_norm) > dead_zone:
+                                smooth_x = smooth_x + alpha_x * (x_norm - smooth_x)
+                                smooth_y = smooth_y + alpha_y * (y_norm - smooth_y)
+                                try:
+                                    pya.moveTo(int(smooth_x), int(smooth_y))
+                                except Exception:
+                                    pass
+
+                                # Convert screen cursor pos → preview window pos
+                                cursor_x = int((smooth_x / screen_w) * VIS_W)
+                                cursor_y = int((smooth_y / screen_h) * VIS_H)
+
+                            # Draw calibration rectangle on camera (debug)
+                            try:
+                                lx, rx = int(space_points["left"][0] * frame_w), int(space_points["right"][0] * frame_w)
+                                ty, by = int(space_points["top"][1] * frame_h), int(space_points["bottom"][1] * frame_h)
+                                cv2.rectangle(frame, (lx, ty), (rx, by), (0, 255, 0), 1)
+                            except Exception:
+                                pass
+
+                    # Draw iris
+                    try:
+                        cx1, cy1 = int(lm[468].x * frame_w), int(lm[468].y * frame_h)
+                        cv2.circle(frame, (cx1, cy1), 2, (0, 0, 255), -1)
+                        cv2.circle(vis, (cursor_x, cursor_y), 8, (0, 255, 255), -1)
+                    except Exception:
+                        pass
+                else:
+                    cv2.putText(frame, "No face detected", (30, 60),
+                                cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+            except Exception:
+                pass
+
+            # UI timing
+            now = time.time()
+            dt = now - prev_time
+            prev_time = now
+            fps = 0.9 * fps + 0.1 * (1.0/dt) if fps else 1.0/dt
+
+            # Prepare panels for UI
+            cam_panel = cv2.resize(frame, (PANEL_W - 40, PANEL_H - 20))
+            proc_panel = letterbox_resize(vis, PANEL_W - 40, PANEL_H - 20)
+
+            ui = build_ui_canvas(
+                palette,
+                title,
+                f"Theme 3: {palette_name}",
+                cam_panel,
+                proc_panel,
+                fps
+            )
+
+            cv2.imshow("UI Theme 3", ui)
+
+            key = cv2.waitKey(1) & 0xFF
+            if key == 27:  # ESC
+                break
+            elif key == 32 and current_calib < len(calib_order):  # SPACE - calibrate
+                if results and results.multi_face_landmarks:
+                    lm = results.multi_face_landmarks[0].landmark
+                    rel_x, rel_y = get_rel_iris(lm)
+                    if rel_x is not None and rel_y is not None:
+                        calib_points[calib_order[current_calib]] = (rel_x, rel_y)
+                        try:
+                            space_points[calib_order[current_calib]] = (lm[468].x, lm[468].y)
+                            space_points2[calib_order[current_calib]] = (lm[473].x, lm[473].y)
+                        except Exception:
+                            pass
+                        current_calib += 1
+                    else:
+                        print("⚠️ Tried to calibrate but iris not valid, skipped.")
+            elif key == ord('s'):  # Recalibrate
+                calib_points = {}
+                space_points = {}
+                space_points2 = {}
+                current_calib = 0
+                smooth_x = smooth_y = 0
+
+    cap.release()
+    cv2.destroyAllWindows()
+
+if __name__ == "__main__":
+    run_ui_tester_with_gaze()
